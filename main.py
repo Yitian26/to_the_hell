@@ -1,7 +1,7 @@
 import pygame
 from game import *
 from random import choice, randint
-from utills import *
+from utils import *
 from UI import *
 import time
 from threading import Thread
@@ -35,6 +35,7 @@ COLOR = {
 }
 CHOICE = [SOLID, SOLID, SOLID, FRAGILE, FRAGILE, BELT_LEFT, BELT_RIGHT, DEADLY, BOUNCE]
 
+MAX_ROLLING_SPEED = 6
 ROLLING_SPEED = 2
 FALLING_SPEED = 3
 MOVING_SPEED = 2
@@ -335,8 +336,19 @@ class Hell(Game):
         ]
         self.currentSkill_index = 0
         self.score_players = {0: 0}
-        
-        self.gameStastics = {"mostScorePlayer":"","firstDie":""}
+        self.destroyed_players = {0: 0}
+        self.skilled_players = {0: 0}
+        self.jump_players = {0: 0}
+        self.gameStastics = {
+            "scoreTaker": [0, 0],
+            "firstBlood": [0, 0],
+            "skilled": [0, 0],
+            "destroyer": [0, 0],
+            "rabbit": [0, 0],
+            "astronaunt": 0,
+            "toHell": 0,
+            "bandage": 0,
+        }
         # network
         # server
         self.active_connection = 0
@@ -346,7 +358,6 @@ class Hell(Game):
         self.server = None
         self.is_server = False
         self.prepared_list = {0: False}
-        self.startTime = 0
         # client
         self.ServerTimeOut = False
         self.currentServer = ""
@@ -360,12 +371,14 @@ class Hell(Game):
             self.barrier = [Barrier(self.screen, SOLID)]
         self.score = 0
         self.last = 6 * SIDE
+        self.timeTick = 0
         l = len(self.players.items())
         if l == 0:
             self.players[0] = Player(
                 self,
                 [dash(pygame.K_q), wall(pygame.K_w), hilaijinnojyutsu(pygame.K_e)],
-                name = "player0",id = 0
+                name="player0",
+                id=0,
             )
         elif l > 1:
             self.players = {0: self.players[0]}
@@ -378,13 +391,28 @@ class Hell(Game):
         if len(self.barrier) > 1:
             self.barrier = [Barrier(self.screen, SOLID)]
         if len(self.players.items()) == 0:
-            self.players[0] = Player(
-                self,
-                [dash(pygame.K_q)],
-                name = "player0",id = 0
-            )
+            self.players[0] = Player(self, [dash(pygame.K_q)], name="player0", id=0)
         self.score = 0
         self.last = 6 * SIDE
+        self.timeTick = 0
+        for key in self.score_players.keys():
+            self.score_players[key] = 0
+        for key in self.destroyed_players.keys():
+            self.destroyed_players[key] = 0
+        for key in self.skilled_players.keys():
+            self.skilled_players[key] = 0
+        for key in self.jump_players.keys():
+            self.jump_players[key] = 0
+        self.gameStastics = {
+            "scoreTaker": [0, 0],
+            "firstBlood": [0, 0],
+            "skilled": [0, 0],
+            "destroyer": [0, 0],
+            "rabbit": [0, 0],
+            "astronaunt": 0,
+            "toHell": 0,
+            "bandage": 0,
+        }
         for player in self.players.values():
             player.reset()
 
@@ -524,7 +552,8 @@ class Hell(Game):
                     self.players[0] = Player(
                         self,
                         [eval(self.skill_list[self.currentSkill_index][1])],
-                        id=0,name = "player0"
+                        id=0,
+                        name="player0",
                     )
                 elif element.name == "skill_right":
                     self.currentSkill_index = (self.currentSkill_index + 1) % len(
@@ -534,7 +563,8 @@ class Hell(Game):
                     self.players[0] = Player(
                         self,
                         [eval(self.skill_list[self.currentSkill_index][1])],
-                        id=0,name = "player0"
+                        id=0,
+                        name="player0",
                     )
 
     def menu_handler(self, pos):
@@ -720,10 +750,13 @@ class Hell(Game):
             thread.start()
 
     def dealConnection(self, connection, id):
-        self.players[id] = Player(self, name = f"player{id}",id = 0)
+        self.players[id] = Player(self, name=f"player{id}", id=0)
         self.players[id].body_color = randomColor()
         self.score_players[id] = 0
         self.prepared_list[id] = False
+        self.destroyed_players[id] = 0
+        self.skilled_players[id] = 0
+        self.jump_players[id] = 0
         if self.is_server:
             connection.send(b"OKOKOKOKOKOK")
         while True:
@@ -739,6 +772,9 @@ class Hell(Game):
                 del self.prepared_list[id]
                 del self.players[id]
                 del self.score_players[id]
+                del self.destroyed_players[id]
+                del self.skilled_players[id]
+                del self.jump_players[id]
                 break
             elif self.currentPage == INGAME_MULTIPLE:
                 if data == "up":
@@ -765,7 +801,8 @@ class Hell(Game):
                     self.players[id] = Player(
                         self,
                         [eval(self.skill_list[int(data[3:])][1])],
-                        id=id,name = f"player{id}"
+                        id=id,
+                        name=f"player{id}",
                     )
 
     def get_all_hosts(self):
@@ -925,7 +962,7 @@ class Hell(Game):
         self.error_page.draw()
         pygame.display.update()
 
-    def to_hell(self):
+    def to_hell(self, rollingSpeed=ROLLING_SPEED):
         """
         更新所有人物状态
         receive:key
@@ -941,7 +978,7 @@ class Hell(Game):
             # 去看barrier的生成逻辑
         # 更新障碍状态
         for ba in self.barrier:
-            if not ba.rise():
+            if not ba.rise(rollingSpeed):
                 # 如果这个ba（不在屏幕内）或者（是frag且被踩掉了）
                 if ba.type == FRAGILE and ba.rect.top > 0:
                     # 屏幕内被踩掉的frag
@@ -959,7 +996,7 @@ class Hell(Game):
             # 下降
             player.fall_man()
             # 障碍交互逻辑
-            player.exec_barriers()
+            player.exec_barriers(rollingSpeed)
         """
         回传各个人物位置，障碍位置，分数
         """
@@ -979,21 +1016,36 @@ class Hell(Game):
     def update(self, current_time=None):
         # 更新下一帧状态
         if self.currentPage == INGAME_SOLO:
+            self.timeTick += 1
             if not self.players[0].alive:
                 self.currentPage = ENDPAGE_SOLO
             if self.is_pause:
                 return
-            self.to_hell()
+            rollingSpeed = ROLLING_SPEED + self.timeTick // 1200
+            self.to_hell(
+                rollingSpeed if rollingSpeed < MAX_ROLLING_SPEED else MAX_ROLLING_SPEED
+            )
         elif self.currentPage == INGAME_MULTIPLE:
+            self.timeTick += 1
             end = True
             for player in self.players.values():
                 if player.alive:
                     end = False
+                elif self.gameStastics["firstBlood"][1] == 0:
+                    self.gameStastics["firstBlood"][1] = self.timeTick / 60
+                    self.gameStastics["firstBlood"][0] = player.id
             if end:
                 self.currentPage = ENDPAGE_MULTIPLE
+                self.gameStastics["scoreTaker"] = max(self.score_players,key = self.score_players.get)
+                self.gameStastics["destroyer"] = max(self.destroyed_players,key = self.destroyed_players.get)
+                self.gameStastics["rabbit"] = max(self.jump_players,key = self.jump_players.get)
+                self.gameStastics["skilled"] = max(self.skilled_players,key = self.skilled_players.get)
                 for connection in self.connections:
                     connection.send(b"ENDENDENDEND" + b"0" * 244)
-            self.to_hell()
+            rollingSpeed = ROLLING_SPEED + self.timeTick // 1200
+            self.to_hell(
+                rollingSpeed if rollingSpeed < MAX_ROLLING_SPEED else MAX_ROLLING_SPEED
+            )
             message = self.message_format()
             for connection in self.connections:
                 connection.send(message.encode("UTF-8"))
@@ -1009,7 +1061,6 @@ class Hell(Game):
                 self.currentPage = INGAME_MULTIPLE
                 for connection in self.connections:
                     connection.send(b"STSTSTSTSTST" + b"0" * 244)
-                self.startTime = time.time()
 
     def draw(self, current_time=None):
         # 绘制下一帧

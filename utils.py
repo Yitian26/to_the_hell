@@ -30,6 +30,7 @@ COLOR = {
 }
 CHOICE = [SOLID, SOLID, SOLID, FRAGILE, FRAGILE, BELT_LEFT, BELT_RIGHT, DEADLY, BOUNCE]
 
+MAX_ROLLING_SPEED = 6
 ROLLING_SPEED = 2
 FALLING_SPEED = 3
 MOVING_SPEED = 2
@@ -54,6 +55,8 @@ def string_align_cnter(string, length):
         return string[:length]
     else:
         return " " * ((length - len(string)) // 2) + string
+
+
 # ---------------------------------------平台类---------------------------------------
 class Barrier:
     def __init__(self, screen, opt=None, x=None, y=None):
@@ -141,6 +144,8 @@ class Player:
     def jump(self, key=1, vel=-8):
         if (not self.hell.is_pause) and (self.hell.currentPage != MENU):
             if self.jumpChance > 0:
+                if self.hell.currentPage == INGAME_MULTIPLE:
+                    self.hell.jump_players[self.id] += 1
                 self.fallingSpeed = vel
                 self.jumpChance -= 1
 
@@ -173,13 +178,15 @@ class Player:
             ba.score = True
             # 因为每次循环都会调用这个函数，这里表示这个ba的分数已经拿到过了
 
-    def exec_barriers(self):
+    def exec_barriers(self, vel=ROLLING_SPEED):
         for ba in self.hell.barrier:
             if not self.body.colliderect(ba.rect):
                 self.get_score(ba)
                 continue
             # 以下都是建立在角色踩在障碍物的条件之上的
             if ba.type == DEADLY:
+                if self.currentPage == INGAME_MULTIPLE:
+                    self.hell.gameStastics["bandage"] = self.id
                 self.alive = False
                 return
             if ba.type == BOUNCE:
@@ -187,17 +194,23 @@ class Player:
                 return
             # 角色跟随障碍物
             self.fallingSpeed = 0
-            self.body.top -= ROLLING_SPEED
+            self.body.top -= vel
             # 重置跳跃次数
             self.jumpChance = MAX_JUMP_CHANCE
             if ba.type == FRAGILE:
+                if not ba.frag_touch:
+                    self.hell.destroyed_players[self.id] += 1
                 ba.frag_touch = True
             elif ba.type == BELT_LEFT or ba.type == BELT_RIGHT:
                 self.move_man(ba.belt_dire, BELT_SPEED)
             break
 
         top = self.body.top
-        if top < 0 or top + SIDE >= SCREEN_HEIGHT:
+        if top < 0:
+            self.hell.gameStastics["astronaunt"] = self.id
+            self.alive = False
+        if top + SIDE >= SCREEN_HEIGHT:
+            self.hell.gameStastics["toHell"] = self.id
             self.alive = False
 
     def fall_man(self):
@@ -252,6 +265,8 @@ class Skill:
         self.player = player
 
     def use(self):
+        if self.player.hell.currentPage == INGAME_MULTIPLE:
+            self.player.hell.skilled[self.player.id] += 1
         pass
 
     def update(self):
@@ -267,6 +282,7 @@ class dash(Skill):
         self.cd = 0
 
     def use(self, key, distance=5):
+        super(dash, self).use()
         if self.cd != 0:
             return
         dire = self.player.dire
@@ -296,6 +312,7 @@ class wall(Skill):
         self.cd = 0
 
     def use(self, key):
+        super(wall, self).use()
         if self.cd != 0:
             return
         self.player.hell.create_barrier(
@@ -319,6 +336,7 @@ class hilaijinnojyutsu(Skill):
         self.cd = 0
 
     def use(self, key):
+        super(hilaijinnojyutsu, self).use()
         if self.ishilaijin == 1:
             self.player.body = self.product
             self.player.fallingSpeed = 0
